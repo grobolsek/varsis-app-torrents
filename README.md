@@ -16,11 +16,18 @@ It needs a Varsis version with plugin support (it has the folder `backend/app/pl
 You need a checkout of `varsis-app` next to this folder (or set `VARSIS_CORE` to its path), and Docker with the
 Buildx plugin (part of Docker Desktop; on Arch: `sudo pacman -S docker-buildx`). The images are built from the
 Varsis Dockerfiles, with this plugin passed in as an extra build context.
+
+Run these in this folder:
 ```bash
 cat ../varsis-app/.env.example .env.example > .env   # then fill it in (see the comments in it)
 cp vpn.env.example vpn.env                           # then put the VPN key in it
 docker compose up --build
 ```
+- **Varsis already running without torrents?** Stop it first (`docker compose down` in `varsis-app`): both use
+  port 8080 and the same data folders.
+- **Already have a filled-in `.env` in `varsis-app`?** Copy it here instead of the `cat` line and add the settings
+  from this folder's `.env.example`. If it still has `WIREGUARD_PRIVATE_KEY`, move that line to `vpn.env`.
+- Then do the one-time setup below; the Torrents page only appears once it's done.
 
 | Service | URL |
 |---|---|
