@@ -1,0 +1,102 @@
+# Varsis with torrents: the Varsis app built with this plugin inside, plus Prowlarr, FlareSolverr, a VPN and qBittorrent.
+#   docker compose up --build
+# The app's own code is taken from VARSIS_CORE (default: a checkout of varsis-app next to this folder).
+# db, backend, frontend and mailpit are the same as in its docker-compose.yml; only the lines marked "plugin" differ.
+# All data lives in folders under DATA_DIR (default /varsis): postgres, music, covers, downloads, prowlarr, qbittorrent.
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: varsis
+      # Only used when the database volume is first created. To change it later, also run
+      # ALTER USER varsis PASSWORD '...' in the database.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: varsis
+    volumes: ["${DATA_DIR:-/varsis}/postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U varsis"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ${VARSIS_CORE:-../varsis-app}/backend
+      additional_contexts:
+        plugins: ./backend # plugin: copied into app/plugins/ during the build
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://varsis:${POSTGRES_PASSWORD}@db:5432/varsis
+    depends_on:
+      db: { condition: service_healthy }
+    volumes:
+      - ${DATA_DIR:-/varsis}/music:/music
+      - ${DATA_DIR:-/varsis}/downloads:/downloads # plugin
+      - ${DATA_DIR:-/varsis}/covers:/covers
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+
+  frontend:
+    build:
+      context: ${VARSIS_CORE:-../varsis-app}/frontend
+      additional_contexts:
+        plugins: ./frontend # plugin: copied into src/plugins/ during the build
+    restart: unless-stopped
+    ports: ["8080:80"]
+    depends_on: [backend]
+
+  mailpit:
+    image: axllent/mailpit:v1.33.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:2.7.0.5723-ls167
+    restart: unless-stopped
+    environment: { PUID: "1000", PGID: "1000", TZ: "${TZ:-Europe/Ljubljana}" }
+    volumes: ["${DATA_DIR:-/varsis}/prowlarr:/config"]
+    ports: ["127.0.0.1:9696:9696"]
+
+  # Solves Cloudflare challenges for Prowlarr indexers (e.g. bt.etree.org).
+  # In Prowlarr: Settings → Indexers → add FlareSolverr proxy at http://flaresolverr:8191, tag it, tag the indexer.
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.5.2
+    restart: unless-stopped
+    environment: { LOG_LEVEL: info, TZ: "${TZ:-Europe/Ljubljana}" }
+
+  # Proton VPN tunnel for torrent traffic only. qBittorrent shares this container's network,
+  # so it has no internet if the VPN is down (kill switch).
+  gluetun:
+    image: qmcgaw/gluetun:v3
+    restart: unless-stopped
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun:/dev/net/tun]
+    # The VPN key is in its own file, so only this container gets it (the backend is given everything in .env).
+    env_file: vpn.env # WIREGUARD_PRIVATE_KEY, SERVER_COUNTRIES
+    environment:
+      VPN_SERVICE_PROVIDER: protonvpn
+      VPN_TYPE: wireguard
+      PORT_FORWARD_ONLY: "on" # only P2P servers with port forwarding
+      VPN_PORT_FORWARDING: "on"
+      # Tell qBittorrent which port Proton forwarded (needs localhost auth bypass in qBittorrent)
+      VPN_PORT_FORWARDING_UP_COMMAND: >-
+        /bin/sh -c 'wget -O- --retry-connrefused --post-data "json={\"listen_port\":{{PORTS}}}" http://127.0.0.1:8081/api/v2/app/setPreferences 2>&1'
+      TZ: ${TZ:-Europe/Ljubljana}
+    ports: ["127.0.0.1:8081:8081"] # qBittorrent web UI
+    networks:
+      default:
+        aliases: [qbittorrent] # backend keeps using http://qbittorrent:8081
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls486
+    network_mode: service:gluetun
+    # Start with gluetun even while the VPN is still connecting (no internet until it's up = kill switch).
+    depends_on:
+      gluetun: { condition: service_started }
+    restart: unless-stopped
+    environment: { PUID: "1000", PGID: "1000", TZ: "${TZ:-Europe/Ljubljana}", WEBUI_PORT: "8081" }
+    volumes:
+      - ${DATA_DIR:-/varsis}/qbittorrent:/config
+      - ${DATA_DIR:-/varsis}/downloads:/downloads

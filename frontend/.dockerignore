@@ -1,0 +1,5 @@
+# Everything else in this folder is copied into the frontend build (as src/plugins/).
+**/node_modules
+**/dist
+**/.env*
+.dockerignore

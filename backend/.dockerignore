@@ -1,0 +1,6 @@
+# Everything else in this folder is copied into the backend image (as app/plugins/).
+**/__pycache__
+**/*.pyc
+**/.env*
+**/.ruff_cache
+.dockerignore

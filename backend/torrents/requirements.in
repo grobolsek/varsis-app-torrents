@@ -1,0 +1,3 @@
+# What the plugin needs on top of the Varsis backend. requirements.txt is made from this file; see the README
+# ("Changing the plugin's Python packages") for the command.
+qbittorrent-api==2026.10.1

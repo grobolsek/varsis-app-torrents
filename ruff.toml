@@ -1,0 +1,8 @@
+# Same rules as the Varsis backend.
+line-length = 120
+
+[lint]
+extend-select = ["D"] # docstrings: every public module, class and function needs one
+
+[lint.pydocstyle]
+convention = "google"
